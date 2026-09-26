@@ -14,6 +14,12 @@ ALUMNI_TERMS = (
 )
 
 BATCH_RE = re.compile(r"\b(200(?:0|[1-9])|201\d|202[0-5])\b")
+NON_HTML_EXTENSIONS = (
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".zip", ".rar", ".7z", ".jpg", ".jpeg", ".png", ".gif", ".webp",
+    ".mp4", ".mp3", ".avi", ".mov"
+)
+
 
 class AlumniSpider(scrapy.Spider):
     name = "alumni"
@@ -36,7 +42,7 @@ class AlumniSpider(scrapy.Spider):
         super().__init__(*args, **kwargs)
         self.college_csv = college_csv
 
-    def start_requests(self):
+    async def start(self):
         if self.college_csv:
             path = Path(self.college_csv)
             with path.open(newline="", encoding="utf-8") as f:
@@ -61,7 +67,13 @@ class AlumniSpider(scrapy.Spider):
 
         for href in response.css("a::attr(href)").getall():
             url = urljoin(response.url, href)
-            label = " ".join(response.css(f'a[href="{href}"] ::text').getall()).lower()
+            if self.is_non_html_url(url):
+                continue
+
+            label = " ".join(
+                response.css(f'a[href="{href}"] ::text').getall()
+            ).lower()
+
             if any(term in (label + " " + url.lower()) for term in ALUMNI_TERMS):
                 if self.same_domain(url, root):
                     yield scrapy.Request(
@@ -85,6 +97,22 @@ class AlumniSpider(scrapy.Spider):
         if response.status != 200:
             return
 
+        content_type = response.headers.get(b"Content-Type", b"").decode(
+            "latin-1", errors="ignore"
+        ).lower()
+        if content_type and not any(
+            x in content_type for x in ("text/html", "application/xhtml+xml")
+        ):
+            self.logger.info(
+                "Skipping non-HTML alumni URL: %s (%s)",
+                response.url,
+                content_type,
+            )
+            return
+
+        if self.is_non_html_url(response.url):
+            return
+
         college = response.meta["college_name"]
         text = " ".join(response.css("body *::text").getall())
         text = re.sub(r"\s+", " ", text).strip()
@@ -92,7 +120,9 @@ class AlumniSpider(scrapy.Spider):
         if not any(term in text.lower() for term in ALUMNI_TERMS):
             return
 
-        for block in response.css("h1::text, h2::text, h3::text, h4::text, li::text, td::text").getall():
+        for block in response.css(
+            "h1::text, h2::text, h3::text, h4::text, li::text, td::text"
+        ).getall():
             clean = re.sub(r"\s+", " ", block).strip()
             if not self.looks_like_name(clean):
                 continue
@@ -114,7 +144,10 @@ class AlumniSpider(scrapy.Spider):
         if len(text) < 4 or len(text) > 100:
             return False
         lower = text.lower()
-        if any(x in lower for x in ("alumni", "association", "department", "engineering", "college", "contact")):
+        if any(
+            x in lower
+            for x in ("alumni", "association", "department", "engineering", "college", "contact")
+        ):
             return False
         words = re.findall(r"[A-Za-z][A-Za-z.'-]*", text)
         return 2 <= len(words) <= 6 and sum(w[0].isupper() for w in words) >= 2
@@ -123,7 +156,13 @@ class AlumniSpider(scrapy.Spider):
         return re.sub(r"\s+", " ", text).strip(" -,:;")
 
     def same_domain(self, url, root):
-        return urlparse(url).netloc.lower().endswith(urlparse(root).netloc.lower())
+        url_host = (urlparse(url).hostname or "").lower()
+        root_host = (urlparse(root).hostname or "").lower()
+        return url_host == root_host or url_host.endswith("." + root_host)
+
+    def is_non_html_url(self, url):
+        path = (urlparse(url).path or "").lower()
+        return any(path.endswith(ext) for ext in NON_HTML_EXTENSIONS)
 
     def errback_log(self, failure):
         self.logger.warning("Request failed: %s", failure.request.url)
