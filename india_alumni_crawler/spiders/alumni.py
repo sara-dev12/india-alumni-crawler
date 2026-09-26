@@ -15,29 +15,37 @@ ALUMNI_TERMS = (
 
 BATCH_RE = re.compile(r"\b(200(?:0|[1-9])|201\d|202[0-5])\b")
 BATCH_CODE_RE = re.compile(r"^\d{4}\s*/", re.I)
+NAME_RE = re.compile(
+    r"^(?:(?:mr|ms|mrs|dr|prof|shri|smt)\.\s+)?"
+    r"[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,5}$"
+)
 NON_HTML_EXTENSIONS = (
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
     ".zip", ".rar", ".7z", ".jpg", ".jpeg", ".png", ".gif", ".webp",
     ".mp4", ".mp3", ".avi", ".mov"
 )
 
-NAVIGATION_WORDS = {
+GENERIC_PHRASES = {
+    "404 not found", "page not found", "awards & achievements",
+    "iit guwahati by the numbers", "welcome to acir", "degree/certificate",
+    "make a gift", "opportunities for faculty", "national institute of technology",
+    "tamil nadu, india", "working with other offices regarding mous",
     "our campus", "quick links", "general links", "giving back",
     "joy of giving", "iit madras foundation", "distinguished alumnus awards",
     "duplicate degree", "upcoming events", "the institute", "student cell",
-    "it manager", "academic initiatives", "student initiatives",
-    "batch initiatives", "infrastructure initiatives", "community welfare",
-    "associate deans", "partnership opportunities", "philanthropist society",
-    "student aid", "emergency fund", "what's new", "director's message",
-    "dean's message", "institute services", "guest house", "no dues",
-    "acir campaign", "institute development"
+    "academic initiatives", "student initiatives", "batch initiatives",
+    "infrastructure initiatives", "community welfare", "associate deans",
+    "partnership opportunities", "philanthropist society", "student aid",
+    "emergency fund", "what's new", "director's message", "dean's message",
+    "institute services", "guest house", "no dues", "acir campaign",
+    "institute development"
 }
 
 JOB_TITLE_WORDS = {
-    "manager", "director", "dean", "professor", "prof", "associate",
-    "engineer", "developer", "officer", "president", "chairman",
-    "chairperson", "secretary", "founder", "ceo", "cto", "cfo",
-    "administrator", "coordinator", "consultant", "analyst", "scientist"
+    "manager", "director", "dean", "professor", "associate", "engineer",
+    "developer", "officer", "president", "chairman", "chairperson",
+    "secretary", "founder", "ceo", "cto", "cfo", "administrator",
+    "coordinator", "consultant", "analyst", "scientist"
 }
 
 
@@ -123,36 +131,44 @@ class AlumniSpider(scrapy.Spider):
         if content_type and not any(
             x in content_type for x in ("text/html", "application/xhtml+xml")
         ):
-            self.logger.info(
-                "Skipping non-HTML alumni URL: %s (%s)",
-                response.url,
-                content_type,
-            )
             return
 
         if self.is_non_html_url(response.url):
             return
 
         college = response.meta["college_name"]
-        text = " ".join(response.css("body *::text").getall())
-        text = re.sub(r"\s+", " ", text).strip()
+        page_title = self.clean_name(response.css("title::text").get() or "")
 
-        if not any(term in text.lower() for term in ALUMNI_TERMS):
+        # Custom 404 pages often return HTTP 200. Do not extract their labels
+        # as people.
+        page_text = " ".join(response.css("body *::text").getall())
+        page_text = re.sub(r"\s+", " ", page_text).strip()
+        page_lower = page_text.lower()
+        if self.is_error_page(page_title, page_lower):
             return
 
-        for block in response.css(
-            "h1::text, h2::text, h3::text, h4::text, li::text, td::text"
-        ).getall():
-            clean = re.sub(r"\s+", " ", block).strip()
-            if not self.looks_like_name(clean):
+        if not any(term in page_lower for term in ALUMNI_TERMS):
+            return
+
+        selectors = (
+            "h1::text, h2::text, h3::text, h4::text, "
+            "a::text, td::text, li::text"
+        )
+
+        seen = set()
+        for block in response.css(selectors).getall():
+            clean = self.clean_name(block)
+            key = clean.casefold()
+            if key in seen or not self.looks_like_name(clean):
                 continue
+            seen.add(key)
 
             year_match = BATCH_RE.search(clean)
             year = int(year_match.group(1)) if year_match else None
 
             yield AlumniItem(
                 college_name=college,
-                alumni_name=self.clean_name(clean),
+                alumni_name=clean,
                 degree=None,
                 department=None,
                 graduation_year=year,
@@ -162,13 +178,21 @@ class AlumniSpider(scrapy.Spider):
                 extraction_status="CANDIDATE",
             )
 
+    def is_error_page(self, title, page_lower):
+        title_lower = title.lower()
+        if "404" in title_lower or "not found" in title_lower:
+            return True
+        if "404 not found" in page_lower[:1000]:
+            return True
+        return False
+
     def looks_like_name(self, text):
         text = self.clean_name(text)
         if len(text) < 4 or len(text) > 100:
             return False
 
         lower = text.lower()
-        if lower in NAVIGATION_WORDS:
+        if lower in GENERIC_PHRASES:
             return False
 
         if BATCH_CODE_RE.match(text):
@@ -180,7 +204,8 @@ class AlumniSpider(scrapy.Spider):
                 "alumni", "association", "department", "engineering",
                 "college", "contact", "foundation", "campaign",
                 "initiative", "events", "links", "fund", "programme",
-                "program", "students", "campus"
+                "program", "students", "campus", "opportunities",
+                "technology", "institute", "working with", "office"
             )
         ):
             return False
@@ -189,12 +214,10 @@ class AlumniSpider(scrapy.Spider):
         if not 2 <= len(words) <= 6:
             return False
 
-        # Avoid navigation/job-title fragments while retaining titles such as
-        # Mr., Ms., Dr. and Prof. before actual names.
         core_words = [
             w.lower().rstrip(".")
             for w in words
-            if w.lower().rstrip(".") not in {"mr", "ms", "mrs", "dr", "prof", "shri"}
+            if w.lower().rstrip(".") not in {"mr", "ms", "mrs", "dr", "prof", "shri", "smt"}
         ]
         if len(core_words) < 2:
             return False
@@ -202,7 +225,11 @@ class AlumniSpider(scrapy.Spider):
         if any(w in JOB_TITLE_WORDS for w in core_words):
             return False
 
-        return sum(w[0].isupper() for w in words) >= 2
+        # Person-name candidates should have normal name capitalization.
+        if not NAME_RE.match(text):
+            return False
+
+        return True
 
     def clean_name(self, text):
         return re.sub(r"\s+", " ", text).strip(" -,:;")
