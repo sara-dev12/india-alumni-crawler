@@ -19,12 +19,15 @@ class AlumniSpider(scrapy.Spider):
     name = "alumni"
     allowed_http_codes = [200, 301, 302, 403, 404, 429, 500, 502, 503, 504]
 
-    def __init__(self, college_csv="data/colleges.csv", *args, **kwargs):
+    def __init__(self, college_csv=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.college_csv = college_csv
 
     def start_requests(self):
-        path = Path(self.college_csv)
+        if self.college_csv:
+            path = Path(self.college_csv)
+        else:
+            path = Path(__file__).resolve().parents[1] / "data" / "colleges.csv"
         with path.open(newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 yield scrapy.Request(
