@@ -19,6 +19,19 @@ class AlumniSpider(scrapy.Spider):
     name = "alumni"
     allowed_http_codes = [200, 301, 302, 403, 404, 429, 500, 502, 503, 504]
 
+    COLLEGES = [
+        ("IIT Madras", "https://www.iitm.ac.in/"),
+        ("IIT Delhi", "https://home.iitd.ac.in/"),
+        ("IIT Bombay", "https://www.iitb.ac.in/"),
+        ("IIT Kanpur", "https://www.iitk.ac.in/"),
+        ("IIT Kharagpur", "https://www.iitkgp.ac.in/"),
+        ("IIT Roorkee", "https://www.iitr.ac.in/"),
+        ("IIT Guwahati", "https://www.iitg.ac.in/"),
+        ("NIT Trichy", "https://www.nitt.edu/"),
+        ("NIT Surathkal", "https://www.nitk.ac.in/"),
+        ("NIT Warangal", "https://www.nitw.ac.in/"),
+    ]
+
     def __init__(self, college_csv=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.college_csv = college_csv
@@ -26,16 +39,21 @@ class AlumniSpider(scrapy.Spider):
     def start_requests(self):
         if self.college_csv:
             path = Path(self.college_csv)
+            with path.open(newline="", encoding="utf-8") as f:
+                colleges = [
+                    (row["college_name"], row["official_website"])
+                    for row in csv.DictReader(f)
+                ]
         else:
-            path = Path(__file__).resolve().parents[1] / "data" / "colleges.csv"
-        with path.open(newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                yield scrapy.Request(
-                    row["official_website"],
-                    callback=self.parse_home,
-                    errback=self.errback_log,
-                    meta={"college_name": row["college_name"], "root": row["official_website"]},
-                )
+            colleges = self.COLLEGES
+
+        for college_name, official_website in colleges:
+            yield scrapy.Request(
+                official_website,
+                callback=self.parse_home,
+                errback=self.errback_log,
+                meta={"college_name": college_name, "root": official_website},
+            )
 
     def parse_home(self, response):
         college = response.meta["college_name"]
