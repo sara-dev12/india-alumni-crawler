@@ -197,7 +197,7 @@ class AlumniSpider(scrapy.Spider):
         explicit = self.extract_explicit_records(body)
         if explicit:
             for candidate in explicit:
-                yield self.emit(candidate, college, response)
+                yield from self.emit(candidate, college, response)
             return
 
         # SECONDARY EXTRACTION:
@@ -227,7 +227,7 @@ class AlumniSpider(scrapy.Spider):
             profile_url = self.node_profile_url(node, response.url)
             evidence = text[:1500]
 
-            yield self.emit({
+            yield from self.emit({
                 "name": name,
                 "degree": degree,
                 "department": self.extract_department(text),
