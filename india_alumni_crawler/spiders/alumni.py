@@ -161,6 +161,10 @@ class AlumniSpider(scrapy.Spider):
 
         seen = set()
 
+        # Extract explicit person + alumni education-code records first.
+        for candidate in self.extract_inline_records(body_text):
+            yield from self.emit_candidate(candidate, college, response, seen)
+
         # 1. Prefer semantic/content containers that look like person cards or records.
         for node in response.xpath(
             "//article | //main//*[self::div or self::li or self::tr]"
@@ -234,6 +238,90 @@ class AlumniSpider(scrapy.Spider):
             evidence_text=candidate.get("evidence", "")[:1500],
             extraction_status="STRUCTURED_CANDIDATE",
         )
+
+    def extract_inline_records(self, text):
+        patterns = (
+            re.compile(
+                r"(?P<name>(?:(?:Mr|Ms|Mrs|Dr|Prof|Shri|Smt)\\.?\\s+)"
+                r"[A-Z][A-Za-z.'-]+(?:\\s+[A-Z][A-Za-z.'-]+){1,5})"
+                r"\\s*\\((?P<code>[^)]*?\\b(?:200\\d|201\\d|202[0-5])\\b[^)]*)\\)",
+                re.I,
+            ),
+            re.compile(
+                r"(?P<name>(?:(?:Mr|Ms|Mrs|Dr|Prof|Shri|Smt)\\.?\\s+)"
+                r"[A-Z][A-Za-z.'-]+(?:\\s+[A-Z][A-Za-z.'-]+){1,5})"
+                r"\\s+(?P<code>(?:200\\d|201\\d|202[0-5])"
+                r"(?:/[A-Za-z0-9.-]+){1,4})",
+                re.I,
+            ),
+        )
+
+        results = []
+        seen = set()
+
+        for pattern in patterns:
+            for match in pattern.finditer(text):
+                name = self.normalize_text(match.group("name"))
+                code = self.normalize_text(match.group("code"))
+                if not self.looks_like_person_name(name):
+                    continue
+
+                year = self.extract_year(code)
+                if year is None or not 2000 <= year <= 2025:
+                    continue
+
+                degree, department = self.parse_education_code(code)
+                key = (name.casefold(), year, code.casefold())
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                start = max(0, match.start() - 120)
+                end = min(len(text), match.end() + 350)
+                results.append({
+                    "name": name,
+                    "year": year,
+                    "degree": degree,
+                    "department": department,
+                    "profile_url": None,
+                    "evidence": self.normalize_text(text[start:end]),
+                })
+
+        return results
+
+    def parse_education_code(self, code):
+        parts = [part.strip(" .").upper() for part in code.split("/") if part.strip()]
+        degree = None
+        department = None
+
+        degree_map = {
+            "BT": "B.Tech",
+            "BTECH": "B.Tech",
+            "B.E": "B.E.",
+            "BE": "B.E.",
+            "MT": "M.Tech",
+            "MTECH": "M.Tech",
+            "ME": "M.E.",
+            "MSC": "M.Sc.",
+            "MSC2": "M.Sc.",
+            "M.SC": "M.Sc.",
+            "MS": "M.S.",
+            "PHD": "Ph.D.",
+            "PH.D": "Ph.D.",
+            "DD": "Dual Degree",
+        }
+
+        for part in parts[1:]:
+            if part in degree_map:
+                degree = degree_map[part]
+                break
+
+        for part in reversed(parts[1:]):
+            if re.fullmatch(r"[A-Z]{2,8}", part) and part not in degree_map:
+                department = part
+                break
+
+        return degree, department
 
     def extract_record(self, node, text):
         if not self.has_record_signal(text):
@@ -320,6 +408,8 @@ class AlumniSpider(scrapy.Spider):
 
         lower = text.casefold()
         if lower in GENERIC_NAMES:
+            return False
+        if any(lower == phrase or lower.startswith(phrase + " ") for phrase in GENERIC_NAMES):
             return False
         if any(term in lower for term in ALUMNI_TERMS):
             return False
