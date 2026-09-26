@@ -14,11 +14,31 @@ ALUMNI_TERMS = (
 )
 
 BATCH_RE = re.compile(r"\b(200(?:0|[1-9])|201\d|202[0-5])\b")
+BATCH_CODE_RE = re.compile(r"^\d{4}\s*/", re.I)
 NON_HTML_EXTENSIONS = (
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
     ".zip", ".rar", ".7z", ".jpg", ".jpeg", ".png", ".gif", ".webp",
     ".mp4", ".mp3", ".avi", ".mov"
 )
+
+NAVIGATION_WORDS = {
+    "our campus", "quick links", "general links", "giving back",
+    "joy of giving", "iit madras foundation", "distinguished alumnus awards",
+    "duplicate degree", "upcoming events", "the institute", "student cell",
+    "it manager", "academic initiatives", "student initiatives",
+    "batch initiatives", "infrastructure initiatives", "community welfare",
+    "associate deans", "partnership opportunities", "philanthropist society",
+    "student aid", "emergency fund", "what's new", "director's message",
+    "dean's message", "institute services", "guest house", "no dues",
+    "acir campaign", "institute development"
+}
+
+JOB_TITLE_WORDS = {
+    "manager", "director", "dean", "professor", "prof", "associate",
+    "engineer", "developer", "officer", "president", "chairman",
+    "chairperson", "secretary", "founder", "ceo", "cto", "cfo",
+    "administrator", "coordinator", "consultant", "analyst", "scientist"
+}
 
 
 class AlumniSpider(scrapy.Spider):
@@ -128,12 +148,14 @@ class AlumniSpider(scrapy.Spider):
                 continue
 
             year_match = BATCH_RE.search(clean)
+            year = int(year_match.group(1)) if year_match else None
+
             yield AlumniItem(
                 college_name=college,
                 alumni_name=self.clean_name(clean),
                 degree=None,
                 department=None,
-                graduation_year=int(year_match.group(1)) if year_match else None,
+                graduation_year=year,
                 alumni_profile_url=response.url,
                 source_url=response.url,
                 evidence_text=clean[:1000],
@@ -141,16 +163,46 @@ class AlumniSpider(scrapy.Spider):
             )
 
     def looks_like_name(self, text):
+        text = self.clean_name(text)
         if len(text) < 4 or len(text) > 100:
             return False
+
         lower = text.lower()
+        if lower in NAVIGATION_WORDS:
+            return False
+
+        if BATCH_CODE_RE.match(text):
+            return False
+
         if any(
             x in lower
-            for x in ("alumni", "association", "department", "engineering", "college", "contact")
+            for x in (
+                "alumni", "association", "department", "engineering",
+                "college", "contact", "foundation", "campaign",
+                "initiative", "events", "links", "fund", "programme",
+                "program", "students", "campus"
+            )
         ):
             return False
+
         words = re.findall(r"[A-Za-z][A-Za-z.'-]*", text)
-        return 2 <= len(words) <= 6 and sum(w[0].isupper() for w in words) >= 2
+        if not 2 <= len(words) <= 6:
+            return False
+
+        # Avoid navigation/job-title fragments while retaining titles such as
+        # Mr., Ms., Dr. and Prof. before actual names.
+        core_words = [
+            w.lower().rstrip(".")
+            for w in words
+            if w.lower().rstrip(".") not in {"mr", "ms", "mrs", "dr", "prof", "shri"}
+        ]
+        if len(core_words) < 2:
+            return False
+
+        if any(w in JOB_TITLE_WORDS for w in core_words):
+            return False
+
+        return sum(w[0].isupper() for w in words) >= 2
 
     def clean_name(self, text):
         return re.sub(r"\s+", " ", text).strip(" -,:;")
