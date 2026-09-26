@@ -3,3 +3,4 @@ wheel>=0.45
 Scrapy==2.13.3
 itemadapter==0.12.1
 python-dateutil==2.9.0.post0
+Twisted>=25.5.0,<26.0
