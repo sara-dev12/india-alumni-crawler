@@ -242,15 +242,15 @@ class AlumniSpider(scrapy.Spider):
     def extract_inline_records(self, text):
         patterns = (
             re.compile(
-                r"(?P<name>(?:(?:Mr|Ms|Mrs|Dr|Prof|Shri|Smt)\\.?\\s+)"
-                r"[A-Z][A-Za-z.'-]+(?:\\s+[A-Z][A-Za-z.'-]+){1,5})"
-                r"\\s*\\((?P<code>[^)]*?\\b(?:200\\d|201\\d|202[0-5])\\b[^)]*)\\)",
+                r"(?P<name>(?:(?:Mr|Ms|Mrs|Dr|Prof|Shri|Smt)\.?\s+)"
+                r"[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,5})"
+                r"\s*\((?P<code>[^)]*?\b(?:200\d|201\d|202[0-5])\b[^)]*)\)",
                 re.I,
             ),
             re.compile(
-                r"(?P<name>(?:(?:Mr|Ms|Mrs|Dr|Prof|Shri|Smt)\\.?\\s+)"
-                r"[A-Z][A-Za-z.'-]+(?:\\s+[A-Z][A-Za-z.'-]+){1,5})"
-                r"\\s+(?P<code>(?:200\\d|201\\d|202[0-5])"
+                r"(?P<name>(?:(?:Mr|Ms|Mrs|Dr|Prof|Shri|Smt)\.?\s+)"
+                r"[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,5})"
+                r"\s+(?P<code>(?:200\d|201\d|202[0-5])"
                 r"(?:/[A-Za-z0-9.-]+){1,4})",
                 re.I,
             ),
